@@ -1,10 +1,16 @@
-# OpenAPI Validation Middleware for `labstack/echo` servers
+# OpenAPI Validation Middleware for `labstack/echo` v5 servers
 
-Middleware for the [Echo web server](https://github.com/labstack/echo) to perform validation of incoming requests via an OpenAPI specification.
+Middleware for the [Echo v5 web server](https://github.com/labstack/echo) to perform validation of incoming requests via an OpenAPI specification.
 
 This project is a lightweight wrapper over the excellent [kin-openapi](https://github.com/getkin/kin-openapi) library's [`openapi3filter` package](https://pkg.go.dev/github.com/getkin/kin-openapi/openapi3filter).
 
 This is _intended_ to be used with code that's generated through [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen), but should work otherwise.
+
+> [!NOTE]
+> Using Echo v4? You want [`oapi-codegen/echo-middleware`](https://github.com/oapi-codegen/echo-middleware) instead.
+
+> [!WARNING]
+> The conversion of this repository from Echo v4 to Echo v5 is in progress, and no release has been tagged yet. This notice will be removed with the first release.
 
 ⚠️ This README may be for the latest development version, which may contain unreleased changes. Please ensure you're looking at the README for the latest release version.
 
@@ -13,10 +19,10 @@ This is _intended_ to be used with code that's generated through [`oapi-codegen`
 You can add the middleware to your project with:
 
 ```sh
-go get github.com/oapi-codegen/echo-middleware
+go get github.com/oapi-codegen/echo-v5-middleware
 ```
 
-There is a full example of usage in [the Go doc for this project](https://pkg.go.dev/github.com/oapi-codegen/echo-middleware#pkg-examples).
+There is a full example of usage in [the Go doc for this project](https://pkg.go.dev/github.com/oapi-codegen/echo-v5-middleware#pkg-examples).
 
 A simplified version of this code is as follows:
 
@@ -56,8 +62,8 @@ e.Use(mw)
 
 | Version | Supported? |
 | -- | -- |
-| `github.com/labstack/echo/v4` | ✅ |
-| `github.com/labstack/echo/v5` | ❌ [Issue](https://github.com/oapi-codegen/echo-middleware/issues/37) |
+| `github.com/labstack/echo/v5` | ✅ |
+| `github.com/labstack/echo/v4` | ❌ Use [`oapi-codegen/echo-middleware`](https://github.com/oapi-codegen/echo-middleware) |
 
 
 ### "This doesn't support ..." / "I think it's a bug that ..."
