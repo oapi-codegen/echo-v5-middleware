@@ -12,7 +12,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/labstack/echo/v4"
-	middleware "github.com/oapi-codegen/echo-middleware"
+	middleware "github.com/oapi-codegen/echo-v5-middleware"
 )
 
 func ExampleOapiRequestValidatorWithOptions() {
