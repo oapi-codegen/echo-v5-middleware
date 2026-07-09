@@ -10,7 +10,6 @@ This is _intended_ to be used with code that's generated through [`oapi-codegen`
 > Using Echo v4? You want [`oapi-codegen/echo-middleware`](https://github.com/oapi-codegen/echo-middleware) instead.
 
 > [!WARNING]
-> The conversion of this repository from Echo v4 to Echo v5 is in progress, and no release has been tagged yet. This notice will be removed with the first release.
 
 ⚠️ This README may be for the latest development version, which may contain unreleased changes. Please ensure you're looking at the README for the latest release version.
 
