@@ -3,8 +3,8 @@ module github.com/oapi-codegen/echo-v5-middleware
 go 1.25.0
 
 require (
-	github.com/getkin/kin-openapi v0.140.0
-	github.com/labstack/echo/v5 v5.2.1
+	github.com/getkin/kin-openapi v0.142.0
+	github.com/labstack/echo/v5 v5.3.0
 	github.com/stretchr/testify v1.11.1
 )
 
