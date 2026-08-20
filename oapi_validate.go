@@ -132,10 +132,19 @@ func ValidateRequestFromContext(ctx *echo.Context, router routers.Router, option
 	req := ctx.Request()
 
 	if options != nil && options.Prefix != "" {
-		// Clone the request so downstream handlers still see the original path.
-		clone := req.Clone(req.Context())
-		clone.URL.Path = strings.TrimPrefix(clone.URL.Path, options.Prefix)
-		req = clone
+		// Trim the prefix in place rather than on a clone: Request.Clone copies
+		// the Body reference, so openapi3filter's security validation would read
+		// the original request's body and restore a fresh reader onto the clone
+		// only, leaving the handler a drained body. The deferred restore runs
+		// before the handler, which therefore still sees the original path.
+		path, rawPath := req.URL.Path, req.URL.RawPath
+		req.URL.Path = strings.TrimPrefix(path, options.Prefix)
+		if rawPath != "" {
+			req.URL.RawPath = strings.TrimPrefix(rawPath, options.Prefix)
+		}
+		defer func() {
+			req.URL.Path, req.URL.RawPath = path, rawPath
+		}()
 	}
 
 	route, pathParams, err := router.FindRoute(req)
