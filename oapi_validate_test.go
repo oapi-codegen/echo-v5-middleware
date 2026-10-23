@@ -549,7 +549,9 @@ func TestOapiRequestValidatorWithPrefixRequestBody(t *testing.T) {
 		require.NoError(t, got.readErr)
 		assert.Equal(t, body, string(got.body))
 		assert.Equal(t, "/api/resource", got.path)
-		assert.False(t, got.hasValidated, "body should only expose ValidatedValue() with KeepValidatedValue")
+		// KeepValidatedValue is on by default.
+		require.True(t, got.hasValidated, "handler's body should expose ValidatedValue()")
+		assert.Equal(t, map[string]any{"name": "x"}, got.validated)
 
 		// A body that doesn't match the schema is still rejected.
 		got = prefixedHandlerResult{}
@@ -642,6 +644,79 @@ components:
 		require.NoError(t, got.readErr)
 		assert.Equal(t, body, string(got.body))
 		assert.Equal(t, "/api/resource", got.path)
+	})
+}
+
+// TestOapiRequestValidatorKeepValidatedValue checks that the middleware enables
+// openapi3filter.Options.KeepValidatedValue unless Options.DiscardValidatedValue
+// is set, so the handler's request body exposes the validated value through
+// ValidatedValue() while remaining readable.
+func TestOapiRequestValidatorKeepValidatedValue(t *testing.T) {
+	// Not JSON-canonical on purpose: the handler must see these exact bytes,
+	// not a re-encoding of the decoded value.
+	const body = `{ "name" : "x" }`
+
+	spec, err := openapi3.NewLoader().LoadFromData(testSchema)
+	require.NoError(t, err)
+
+	// serve sends body to POST /resource through mw and returns what the
+	// handler saw.
+	serve := func(t *testing.T, mw echo.MiddlewareFunc) prefixedHandlerResult {
+		t.Helper()
+		e := echo.New()
+		e.Use(mw)
+		var got prefixedHandlerResult
+		e.POST("/resource", got.handler(http.StatusNoContent))
+
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, newRawJSONPost("http://test.hostname/resource", body))
+
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+		require.True(t, got.called, "handler should have been called")
+		require.NoError(t, got.readErr)
+		assert.Equal(t, body, string(got.body), "body should still be readable with the original bytes")
+		return got
+	}
+
+	t.Run("default without options", func(t *testing.T) {
+		got := serve(t, OapiRequestValidator(spec))
+		require.True(t, got.hasValidated, "handler's body should expose ValidatedValue()")
+		assert.Equal(t, map[string]any{"name": "x"}, got.validated)
+	})
+
+	t.Run("default with empty options", func(t *testing.T) {
+		options := &Options{}
+		got := serve(t, OapiRequestValidatorWithOptions(spec, options))
+		require.True(t, got.hasValidated, "handler's body should expose ValidatedValue()")
+		assert.Equal(t, map[string]any{"name": "x"}, got.validated)
+		assert.False(t, options.Options.KeepValidatedValue, "the caller's options should not be modified")
+	})
+
+	t.Run("DiscardValidatedValue", func(t *testing.T) {
+		got := serve(t, OapiRequestValidatorWithOptions(spec, &Options{
+			DiscardValidatedValue: true,
+		}))
+		assert.False(t, got.hasValidated, "handler's body should not expose ValidatedValue()")
+	})
+
+	t.Run("DiscardValidatedValue overrides openapi3filter KeepValidatedValue", func(t *testing.T) {
+		got := serve(t, OapiRequestValidatorWithOptions(spec, &Options{
+			DiscardValidatedValue: true,
+			Options: openapi3filter.Options{
+				KeepValidatedValue: true,
+			},
+		}))
+		assert.False(t, got.hasValidated, "handler's body should not expose ValidatedValue()")
+	})
+
+	t.Run("ExcludeRequestBody", func(t *testing.T) {
+		got := serve(t, OapiRequestValidatorWithOptions(spec, &Options{
+			Options: openapi3filter.Options{
+				ExcludeRequestBody: true,
+			},
+		}))
+		// The body was not validated, so there is no validated value to keep.
+		assert.False(t, got.hasValidated, "handler's body should not expose ValidatedValue()")
 	})
 }
 

@@ -55,6 +55,12 @@ e.Use(mw)
 // now all HTTP routes will be handled by the middleware, and any requests that are invalid will be rejected
 ```
 
+### Validated request body
+
+The middleware enables kin-openapi's [`openapi3filter.Options.KeepValidatedValue`](https://pkg.go.dev/github.com/getkin/kin-openapi/openapi3filter#Options) by default. After a request body passes validation, the body that handlers see (`c.Request().Body`) also has a `ValidatedValue() any` method returning the decoded value that was validated, and it can still be read as usual. This lets a handler, such as an `oapi-codegen` strict server, bind exactly the value that was validated rather than decoding the body a second time, which could interpret it differently (for example, `encoding/json` matches object member names case-insensitively, so `{"role":"user","ROLE":"admin"}` would validate as `role: user` but decode as `Role: "admin"`). To drop the decoded value after validation instead, for instance to limit memory retention for very large request bodies, set `Options.DiscardValidatedValue`; it overrides `Options.Options.KeepValidatedValue`.
+
+Any middleware that runs after the validator and replaces the request body (such as decompression, request size limiting or logging wrappers) hides the validated value from handlers, so register such middleware before the validator.
+
 ## FAQs
 
 ### What versions of Echo does this support?
