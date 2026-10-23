@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -481,6 +482,202 @@ func TestOapiRequestValidatorWithPrefix(t *testing.T) {
 		rec := doGet(t, e, "http://test.hostname/api/resource?id=500")
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 		assert.False(t, called, "Handler should not have been called")
+	}
+}
+
+// newRawJSONPost builds a POST whose body is sent verbatim, so a test can
+// compare the exact bytes that reach the handler.
+func newRawJSONPost(target, body string) *http.Request {
+	r := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
+	r.Header.Set("content-type", "application/json")
+	return r
+}
+
+// prefixedHandlerResult records what a handler mounted under a prefix saw.
+type prefixedHandlerResult struct {
+	called  bool
+	path    string
+	rawPath string
+	body    []byte
+	readErr error
+	// validated is the body's ValidatedValue(), when it has one.
+	validated    any
+	hasValidated bool
+}
+
+func (r *prefixedHandlerResult) handler(status int) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		req := c.Request()
+		r.called = true
+		r.path, r.rawPath = req.URL.Path, req.URL.RawPath
+		if vv, ok := req.Body.(interface{ ValidatedValue() any }); ok {
+			r.validated, r.hasValidated = vv.ValidatedValue(), true
+		}
+		if req.Body != nil {
+			r.body, r.readErr = io.ReadAll(req.Body)
+		}
+		return c.NoContent(status)
+	}
+}
+
+// TestOapiRequestValidatorWithPrefixRequestBody checks that, with
+// Options.Prefix set, the request body openapi3filter reads during validation
+// is restored on the request the handler receives, rather than on a copy of it.
+// See https://github.com/oapi-codegen/echo-v5-middleware/issues/16.
+func TestOapiRequestValidatorWithPrefixRequestBody(t *testing.T) {
+	// Not JSON-canonical on purpose: the handler must see these exact bytes,
+	// not a re-encoding of the decoded value.
+	const body = `{ "name" : "x" }`
+
+	t.Run("body validation", func(t *testing.T) {
+		spec, err := openapi3.NewLoader().LoadFromData(testSchema)
+		require.NoError(t, err)
+
+		e := echo.New()
+		e.Use(OapiRequestValidatorWithOptions(spec, &Options{
+			SilenceServersWarning: true,
+			Prefix:                "/api",
+		}))
+		var got prefixedHandlerResult
+		e.POST("/api/resource", got.handler(http.StatusNoContent))
+
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, newRawJSONPost("http://test.hostname/api/resource", body))
+
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+		require.True(t, got.called, "handler should have been called")
+		require.NoError(t, got.readErr)
+		assert.Equal(t, body, string(got.body))
+		assert.Equal(t, "/api/resource", got.path)
+		assert.False(t, got.hasValidated, "body should only expose ValidatedValue() with KeepValidatedValue")
+
+		// A body that doesn't match the schema is still rejected.
+		got = prefixedHandlerResult{}
+		rec = httptest.NewRecorder()
+		e.ServeHTTP(rec, newRawJSONPost("http://test.hostname/api/resource", `{"name": 5}`))
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.False(t, got.called, "handler should not have been called")
+	})
+
+	t.Run("security validation with ExcludeRequestBody", func(t *testing.T) {
+		// openapi3filter's security validation reads the body even when body
+		// validation is excluded, which is how issue #16 was found.
+		const specYAML = `
+openapi: "3.0.0"
+info:
+  title: t
+  version: 1.0.0
+paths:
+  /thing:
+    post:
+      operationId: createThing
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '204':
+          description: ok
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+`
+		spec, err := openapi3.NewLoader().LoadFromData([]byte(specYAML))
+		require.NoError(t, err)
+
+		e := echo.New()
+		e.Use(OapiRequestValidatorWithOptions(spec, &Options{
+			Prefix:                "/api",
+			SilenceServersWarning: true,
+			Options: openapi3filter.Options{
+				ExcludeRequestBody: true,
+				AuthenticationFunc: func(context.Context, *openapi3filter.AuthenticationInput) error {
+					return nil
+				},
+			},
+		}))
+		var got prefixedHandlerResult
+		e.POST("/api/thing", got.handler(http.StatusNoContent))
+
+		r := newRawJSONPost("/api/thing", body)
+		r.Header.Set("authorization", "Bearer token")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, r)
+
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+		require.True(t, got.called, "handler should have been called")
+		require.NoError(t, got.readErr)
+		assert.Equal(t, body, string(got.body))
+		assert.Equal(t, "/api/thing", got.path)
+	})
+
+	t.Run("KeepValidatedValue", func(t *testing.T) {
+		spec, err := openapi3.NewLoader().LoadFromData(testSchema)
+		require.NoError(t, err)
+
+		e := echo.New()
+		e.Use(OapiRequestValidatorWithOptions(spec, &Options{
+			SilenceServersWarning: true,
+			Prefix:                "/api",
+			Options: openapi3filter.Options{
+				KeepValidatedValue: true,
+			},
+		}))
+		var got prefixedHandlerResult
+		e.POST("/api/resource", got.handler(http.StatusNoContent))
+
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, newRawJSONPost("http://test.hostname/api/resource", body))
+
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+		require.True(t, got.called, "handler should have been called")
+		require.True(t, got.hasValidated, "handler's body should expose ValidatedValue()")
+		assert.Equal(t, map[string]any{"name": "x"}, got.validated)
+		require.NoError(t, got.readErr)
+		assert.Equal(t, body, string(got.body))
+		assert.Equal(t, "/api/resource", got.path)
+	})
+}
+
+// TestOapiRequestValidatorWithPrefixEncodedPathParams checks that the prefix
+// is trimmed from URL.RawPath as well as URL.Path, and both are restored
+// before the handler runs.
+func TestOapiRequestValidatorWithPrefixEncodedPathParams(t *testing.T) {
+	spec, err := openapi3.NewLoader().LoadFromData(testSchema)
+	require.NoError(t, err)
+
+	e := echo.New()
+	e.Use(OapiRequestValidatorWithOptions(spec, &Options{
+		SilenceServersWarning: true,
+		Prefix:                "/api",
+	}))
+	var got prefixedHandlerResult
+	e.GET("/api/resource/maxlength/:param", got.handler(http.StatusNoContent))
+
+	// %2F decodes to a single "/", which satisfies maxLength: 1. The router
+	// matches on URL.EscapedPath(), which only uses RawPath while it is a valid
+	// encoding of Path; if the prefix were trimmed from Path alone, the router
+	// would see the decoded "//" and find no operation.
+	{
+		rec := doGet(t, e, "http://test.hostname/api/resource/maxlength/%2F")
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+		require.True(t, got.called, "handler should have been called")
+		assert.Equal(t, "/api/resource/maxlength//", got.path)
+		assert.Equal(t, "/api/resource/maxlength/%2F", got.rawPath)
+	}
+
+	// %2B%2B decodes to "++", which exceeds maxLength: 1.
+	{
+		got = prefixedHandlerResult{}
+		rec := doGet(t, e, "http://test.hostname/api/resource/maxlength/%2B%2B")
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.False(t, got.called, "handler should not have been called")
 	}
 }
 
