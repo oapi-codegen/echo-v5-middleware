@@ -217,10 +217,7 @@ func ValidateRequestFromContext(ctx *echo.Context, router routers.Router, option
 			// Split up the verbose error by lines and return the first one
 			// openapi errors seem to be multi-line with a decent message on the first
 			errorLines := strings.Split(e.Error(), "\n")
-			return &echo.HTTPError{
-				Code:    http.StatusBadRequest,
-				Message: errorLines[0],
-			}
+			return wrapHTTPError(http.StatusBadRequest, errorLines[0], err)
 		case *openapi3filter.SecurityRequirementsError:
 			for _, err := range e.Errors {
 				var httpErr *echo.HTTPError
@@ -232,17 +229,11 @@ func ValidateRequestFromContext(ctx *echo.Context, router routers.Router, option
 					return echo.NewHTTPError(coder.StatusCode(), err.Error())
 				}
 			}
-			return &echo.HTTPError{
-				Code:    http.StatusForbidden,
-				Message: e.Error(),
-			}
+			return wrapHTTPError(http.StatusForbidden, e.Error(), err)
 		default:
 			// This should never happen today, but if our upstream code changes,
 			// we don't want to crash the server, so handle the unexpected error.
-			return &echo.HTTPError{
-				Code:    http.StatusInternalServerError,
-				Message: fmt.Sprintf("error validating request: %s", err),
-			}
+			return wrapHTTPError(http.StatusInternalServerError, fmt.Sprintf("error validating request: %s", err), err)
 		}
 	}
 	return nil
@@ -310,8 +301,12 @@ func getMultiErrorHandlerFromOptions(options *Options) MultiErrorHandler {
 // of all of the errors. This method is called if there are no other
 // methods defined on the options.
 func defaultMultiErrorHandler(me openapi3.MultiError) *echo.HTTPError {
-	return &echo.HTTPError{
-		Code:    http.StatusBadRequest,
-		Message: me.Error(),
-	}
+	return wrapHTTPError(http.StatusBadRequest, me.Error(), me)
+}
+
+// wrapHTTPError returns an HTTPError that wraps err, so callers can inspect the
+// underlying validation error with errors.As, as HTTPError.Internal allowed in
+// echo v4.
+func wrapHTTPError(code int, message string, err error) *echo.HTTPError {
+	return echo.NewHTTPError(code, message).Wrap(err).(*echo.HTTPError)
 }
