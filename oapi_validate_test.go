@@ -836,6 +836,79 @@ func TestEncodedPathParams(t *testing.T) {
 	}
 }
 
+// TestValidationErrorsWrapUnderlyingError checks that the HTTPError handed to
+// ErrorHandler wraps the validation error, as HTTPError.Internal did with
+// echo v4, so handlers can inspect it with errors.As.
+func TestValidationErrorsWrapUnderlyingError(t *testing.T) {
+	spec, err := openapi3.NewLoader().LoadFromData(testSchema)
+	require.NoError(t, err, "Error initializing OpenAPI spec")
+
+	tests := []struct {
+		name       string
+		multiError bool
+		url        string
+		wantCode   int
+		check      func(t *testing.T, err error)
+	}{
+		{
+			name:     "request error",
+			url:      "http://test.hostname/resource?id=500",
+			wantCode: http.StatusBadRequest,
+			check: func(t *testing.T, err error) {
+				var requestErr *openapi3filter.RequestError
+				assert.ErrorAs(t, err, &requestErr)
+			},
+		},
+		{
+			name:     "security requirements error",
+			url:      "http://test.hostname/protected_resource2",
+			wantCode: http.StatusForbidden,
+			check: func(t *testing.T, err error) {
+				var securityErr *openapi3filter.SecurityRequirementsError
+				assert.ErrorAs(t, err, &securityErr)
+			},
+		},
+		{
+			name:       "multi error",
+			multiError: true,
+			url:        "http://test.hostname/multiparamresource?id=50",
+			wantCode:   http.StatusBadRequest,
+			check: func(t *testing.T, err error) {
+				var multiErr openapi3.MultiError
+				assert.ErrorAs(t, err, &multiErr)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotErr *echo.HTTPError
+			e := echo.New()
+			e.Use(OapiRequestValidatorWithOptions(spec, &Options{
+				ErrorHandler: func(c *echo.Context, err *echo.HTTPError) error {
+					gotErr = err
+					return c.NoContent(err.Code)
+				},
+				Options: openapi3filter.Options{
+					MultiError: tt.multiError,
+					AuthenticationFunc: func(c context.Context, input *openapi3filter.AuthenticationInput) error {
+						return errors.New("forbidden")
+					},
+				},
+			}))
+			e.GET("/*", func(c *echo.Context) error {
+				return c.NoContent(http.StatusOK)
+			})
+
+			rec := doGet(t, e, tt.url)
+			assert.Equal(t, tt.wantCode, rec.Code)
+			require.NotNil(t, gotErr, "ErrorHandler should have been called")
+			assert.Equal(t, tt.wantCode, gotErr.Code)
+			tt.check(t, gotErr)
+		})
+	}
+}
+
 func TestGetSkipperFromOptions(t *testing.T) {
 
 	options := new(Options)
