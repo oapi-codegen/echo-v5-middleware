@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/getkin/kin-openapi v0.152.0
-	github.com/labstack/echo/v5 v5.4.4
+	github.com/labstack/echo/v5 v5.4.5
 	github.com/stretchr/testify v1.12.1
 )
 
